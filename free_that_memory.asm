@@ -13,7 +13,7 @@ free_that_memory:
 	push rbp
 	mov rbp, rsp
 	sub rsp, 0x40
-	mov rcx, [rbp + 16]
+	mov rcx, [rbp + 0x10]
 	mov rdx, 0
 	mov r8, 0x8000
 	call VirtualFree
