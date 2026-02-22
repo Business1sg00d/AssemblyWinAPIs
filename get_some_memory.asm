@@ -14,8 +14,8 @@ get_some_memory:
 	push rbp
 	mov rbp, rsp
 	sub rsp, 0x40
-	mov rcx, 0
-	mov rdx, [rbp + 0x10]
+	mov rdx, rcx
+	xor rcx, rcx
 	mov r8, 0x3000
 	mov r9, 0x04
 	call VirtualAlloc
