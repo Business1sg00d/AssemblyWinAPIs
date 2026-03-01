@@ -21,6 +21,7 @@ main:
 	;Get the PEB at gs:[0x60]
 	mov rax, gs:[0x60]		;PEB location.
 
+
 	;Get the Loaded Modules via the Loader Data Table (LDR).
 	mov qword rbx, [rax + 0x18]
 
@@ -30,38 +31,8 @@ main:
 	;Get the inLoadOrderModuleList Structure.
 	mov qword r13, [rbx + 0x10]
 
-	;Get kernel32 base here? Why this weird offset? It doesn't match what I find online. But whatever.
+	;Get kernel32 here?
 	mov qword r14, [r12 + 0x5a0]
-
-	;0x3c should be where we find the offset to the PE structure.
-	mov rax, r14
-	add rax, 0x3c
-	xor rdi, rdi
-	mov dil, [rax]			;byte loaded offset stored in rdi.
-
-	;Get a pointer to kernel32 PE structure.
-	xor rax, rax
-	mov rax, r14
-	add al, dil
-	mov qword r15, rax		;pointer to PE struct in kernel32.
-
-	;Now we need the Optional Header structure as a pointer.
-	add rax, 0x18			;optional header should be 0x18 away from PE.
-
-	;The Export Directory Table inside the kernel32 image.
-	add rax, 0x70			;per microsoft, the export able should be 0x70 away from our optional header.
-
-	;The Export Address Table offset.
-	add rax, 0x1c			;at the Export Address Table.
-	xor rdi, rdi
-	mov di, [rax]			;should be the offset that is added to the image base. This will be the pointer to functions.
-
-	;Get the functions table pointer.
-	xor rax, rax
-	mov rax, r14
-	add ax, di			;this doesn't look right.
-
-
 	;jmp endit
 
 	;Set up the PROCESS_INFORMATION struct.
