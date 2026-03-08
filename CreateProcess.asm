@@ -48,18 +48,119 @@ main:
 	;Now we need the Optional Header structure as a pointer.
 	add rax, 0x18			;optional header should be 0x18 away from PE.
 
-	;The Export Directory Table inside the kernel32 image.
-	add rax, 0x70			;per microsoft, the export able should be 0x70 away from our optional header.
+	;The Export Directory Table offset inside the kernel32 image.
+	add rax, 0x70			;per microsoft, the export table offset (RVA) should be 0x70 away from our optional header.
 
-	;The Export Address Table offset.
-	add rax, 0x1c			;at the Export Address Table.
+	;Pointer to the Export Directory Table.
 	xor rdi, rdi
-	mov di, [rax]			;should be the offset that is added to the image base. This will be the pointer to functions.
-
-	;Get the functions table pointer.
+	mov edi, [rax]			;should be the offset that is added to the image base. This will be the pointer to functions.
 	xor rax, rax
 	mov rax, r14
-	add ax, di			;this doesn't look right.
+	add rax, rdi
+	xor r12, r12
+	mov qword r12, rax
+
+	;Get the functions table pointer offset in the Export Directory Table.
+	add rax, 0x1c
+	xor rdi, rdi
+	mov edi, [rax]
+
+	;Pointer to the Export Address Table.
+	xor rax, rax
+	mov rax, r14
+	add rax, rdi
+	mov qword r15, rax
+
+	;Pointer to the Ordinal Table RVA.
+	xor rax, rax
+	xor rdi, rdi
+	mov rax, r12
+	add rax, 0x24
+	mov edi, [rax]
+	xor rax, rax
+	mov rax, r14
+	add rax, rdi
+	xor r13, r13
+	mov qword r13, rax
+
+	;Pointer to the Name Table RVA.
+	xor rax, rax
+	xor rdi, rdi
+	xor rbx, rbx
+	mov rax, r12
+	add rax, 0x20
+	mov edi, [rax]
+	xor rax, rax
+	mov rax, r14
+	add rax, rdi
+	mov qword rbx, rax
+
+	;The ordinal base. A constant.
+	xor rax, rax
+	xor rdi, rdi
+	mov rax, r12
+	add rax, 0x10
+	mov dil, [rax]
+
+	;Say I have a loop. Prior to the loop I have a counter that starts at 0.
+	;Going into the loop the first thing I do is grab the RVA of the first entry in the name table. 
+	;I add this RVA to my image base, then look up the string. I compare this string to the function I'm looking for. 
+	;If not found, I increment the counter then start at the begining of my loop. 
+	;Once I find the matching string, I look into the ordinal table using the counter as an index. 
+	;Lets say its 7. I take the ordinal at index 7, then look into the EAT using the ordinal index. 
+	;This should contain the RVA that I add to my image base which is a pointer to the 
+	;begining of the function I am looking for.
+
+	;RBX == Name Table.
+	;R12 == Export Directory Table.
+	;R14 == Image Base of kernel32.
+	;R13 == Ordinal Table pointer.
+
+	;Initializing the counter.
+	xor rdx, rdx
+
+	
+	;Initializing the function that I want, placing the string on the stack.
+	xor rax, rax
+	mov rax, 0x61657243 
+	mov [rsp + 0x100], rax
+	mov rax, 0x72506574 
+	mov [rsp + 0x104], rax
+	mov rax, 0x7365636f 
+	mov [rsp + 0x108], rax
+	mov rax, 0x00004173
+	mov [rsp + 0x10c], rax
+	jmp FindName
+
+
+	;Begin loop.
+FindName:
+	xor rdi, rdi
+	xor rsi, rsi
+	xor rax, rax
+	xor rcx, rcx
+	mov rax, rbx
+	lea rax, [rax + rdx*4]
+	mov edi, [rax]
+	xor rax, rax
+	mov rax, r14
+	add rax, rdi
+	mov rsi, rax
+	lea rdi, [rsp + 0x100]
+	mov rcx, 0x0c
+	repe cmpsb
+	jz endme
+	inc rdx
+	jmp FindName
+
+endme:
+	xor rax, rax
+	xor rax, rax
+	xor rax, rax
+
+
+
+	;Getting offset to ExitProcess.
 
 
 	;jmp endit
