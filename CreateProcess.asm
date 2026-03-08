@@ -1,9 +1,4 @@
 global main
-;extern get_some_memory
-;extern GetStartupInfoW
-;extern CreateProcessA
-;extern ExitProcess
-
 
 ;word == 2 bytes
 ;dword == 4 bytes
@@ -16,7 +11,7 @@ global main
 
 section .text
 main:
-	sub rsp, 0x188			;not sure why I have to add 0x28. Seems counter-intuitive as the stack should be 0x10 aligned.
+	sub rsp, 0x308			;not sure why I have to add 0x28. Seems counter-intuitive as the stack should be 0x10 aligned.
 	
 	;Get the PEB at gs:[0x60]
 	mov rax, gs:[0x60]		;PEB location.
@@ -27,21 +22,19 @@ main:
 	;Get the inMemoryOrderModuleList structure.
 	mov qword r12, [rbx + 0x20]
 
-	;Get the inLoadOrderModuleList Structure.
-	mov qword r13, [rbx + 0x10]
-
-	;Get kernel32 base here? Why this weird offset? It doesn't match what I find online. But whatever.
-	mov qword r14, [r12 + 0x5a0]
+	;Looking for kernel32 base.
+	mov qword rax, [r12]
+	mov qword rax, [rax]
+	mov qword r14, [rax + 0x20]
+	;mov qword r14, [r12 + 0x5a0]
 
 	;0x3c should be where we find the offset to the PE structure.
 	mov rax, r14
 	add rax, 0x3c
-	xor rdi, rdi
-	mov dil, [rax]			;byte loaded offset stored in rdi.
+	movzx rdi, byte [rax]			;byte loaded offset stored in rdi.
 
 	;Get a pointer to kernel32 PE structure.
-	xor rax, rax
-	mov rax, r14
+	mov qword rax, r14
 	add al, dil
 	mov qword r15, rax		;pointer to PE struct in kernel32.
 
@@ -52,55 +45,40 @@ main:
 	add rax, 0x70			;per microsoft, the export table offset (RVA) should be 0x70 away from our optional header.
 
 	;Pointer to the Export Directory Table.
-	xor rdi, rdi
-	mov edi, [rax]			;should be the offset that is added to the image base. This will be the pointer to functions.
-	xor rax, rax
-	mov rax, r14
+	mov edi, dword [rax]			;should be offset thats added to the image base; pointer directory table.
+	mov qword rax, r14
 	add rax, rdi
-	xor r12, r12
 	mov qword r12, rax
 
 	;Get the functions table pointer offset in the Export Directory Table.
 	add rax, 0x1c
-	xor rdi, rdi
 	mov edi, [rax]
 
 	;Pointer to the Export Address Table.
-	xor rax, rax
-	mov rax, r14
+	mov qword rax, r14
 	add rax, rdi
 	mov qword r15, rax
 
 	;Pointer to the Ordinal Table RVA.
-	xor rax, rax
-	xor rdi, rdi
-	mov rax, r12
+	mov qword rax, r12
 	add rax, 0x24
 	mov edi, [rax]
-	xor rax, rax
-	mov rax, r14
+	mov qword rax, r14
 	add rax, rdi
-	xor r13, r13
 	mov qword r13, rax
 
 	;Pointer to the Name Table RVA.
-	xor rax, rax
-	xor rdi, rdi
-	xor rbx, rbx
-	mov rax, r12
+	mov qword rax, r12
 	add rax, 0x20
 	mov edi, [rax]
-	xor rax, rax
-	mov rax, r14
+	mov qword rax, r14
 	add rax, rdi
 	mov qword rbx, rax
 
 	;The ordinal base. A constant.
-	xor rax, rax
-	xor rdi, rdi
-	mov rax, r12
+	mov qword rax, r12
 	add rax, 0x10
-	mov dil, [rax]
+	movzx rdi, byte [rax]
 
 	;Say I have a loop. Prior to the loop I have a counter that starts at 0.
 	;Going into the loop the first thing I do is grab the RVA of the first entry in the name table. 
@@ -113,69 +91,75 @@ main:
 
 	;RBX == Name Table.
 	;R12 == Export Directory Table.
-	;R14 == Image Base of kernel32.
 	;R13 == Ordinal Table pointer.
+	;R14 == Image Base of kernel32.
+	;R15 == Export Address Table (EAT).
 
 	;Initializing the counter.
 	xor rdx, rdx
-
 	
-	;Initializing the function that I want, placing the string on the stack.
-	xor rax, rax
-	mov rax, 0x61657243 
+	;Initializing the function that I want, placing the string on the stack. First check if we need to get a different string.
+gstr:
+	mov eax, 0x61657243 
 	mov [rsp + 0x100], rax
-	mov rax, 0x72506574 
+	mov eax, 0x72506574 
 	mov [rsp + 0x104], rax
-	mov rax, 0x7365636f 
+	mov eax, 0x7365636f 
 	mov [rsp + 0x108], rax
-	mov rax, 0x00004173
+	mov eax, 0x00004173
 	mov [rsp + 0x10c], rax
-	jmp FindName
 
+diffrnt:
+	jmp FindName
 
 	;Begin loop.
 FindName:
-	xor rdi, rdi
-	xor rsi, rsi
-	xor rax, rax
-	xor rcx, rcx
-	mov rax, rbx
+	mov qword rax, rbx
 	lea rax, [rax + rdx*4]
 	mov edi, [rax]
-	xor rax, rax
-	mov rax, r14
+	mov qword rax, r14
 	add rax, rdi
 	mov rsi, rax
 	lea rdi, [rsp + 0x100]
 	mov rcx, 0x0c
 	repe cmpsb
-	jz endme
+	jnz inca
+	jmp contn
+
+inca:
 	inc rdx
 	jmp FindName
 
-endme:
-	xor rax, rax
-	xor rax, rax
-	xor rax, rax
+contn:
+	movzx rax, word [r13 + rdx*2]		;points to the index into EAT that points to RVA for CreateProcessA.
+	mov edi, [r15 + rax*4]			;should be the RVA for CreateProcessA.
+	lea rsi, [r14 + rdi]			;Is this a function pointer?
+	mov rax, [rsp + 0x150]
+	test rax, rax				;will be 0x01 if data exists here.
+	jz initProcA
+	mov rax, [rsp + 0x158]
+	test rax, rax				;will be 0x01 if data exists here.
+	jz initSI
+	mov rax, [rsp + 0x160]
+	test rax, rax				;will be 0x01 if data exists here.
+	jz initEP
 
+initProcA:
+	mov qword rax, rsi
+	mov [rsp + 0x150], rax		;CreateProcessA on the stack via pointer.
+	jmp FindSI
 
+initSI:
+	mov qword rax, rsi
+	mov [rsp + 0x158], rax		;GetStartupInfoW on the stack via pointer.
+	jmp callSI
 
-	;Getting offset to ExitProcess.
+initEP:
+	mov qword rax, rsi
+	mov [rsp + 0x160], rax
+	jmp CrtPrc
 
-
-	;jmp endit
-
-	;Set up the PROCESS_INFORMATION struct.
-	;------------------------------------
-	;typedef struct _PROCESS_INFORMATION {
-	;  HANDLE hProcess;
-	;  HANDLE hThread;
-	;  DWORD  dwProcessId;
-	;  DWORD  dwThreadId;
-	;} PROCESS_INFORMATION, *PPROCESS_INFORMATION, *LPPROCESS_INFORMATION;
-;	lea r13, [rsp + 0x88]			;pointer to PROCESS_INFORMATION struct data.
-;
-;
+	;Now find GetStartupInfoW.
 ;	;Set up the STARTUPINFOA Struct.
 ;	;------------------------------------
 ;	;typedef struct _STARTUPINFOA {
@@ -198,16 +182,47 @@ endme:
 ;	;  HANDLE hStdOutput;
 ;	;  HANDLE hStdError;
 ;	;} STARTUPINFOA, *LPSTARTUPINFOA;
-;	;lea r14, [rsp + 0xa8]		;figure out why the stack is treated differently than the heap.
-;	mov qword rcx, 0x68
-;	call get_some_memory
-;	mov r12, rax
-;	mov rcx, r12
-;	call GetStartupInfoW
-;
-;
+
+	;VOID GetStartupInfoW(
+	;  [out] LPSTARTUPINFOW lpStartupInfo
+	;);
+
+FindSI:
+	mov eax, 0x53746547 
+	mov [rsp + 0x100], rax
+	mov eax, 0x74726174 
+	mov [rsp + 0x104], rax
+	mov eax, 0x6e497075 
+	mov [rsp + 0x108], rax
+	mov eax, 0x00576f66
+	mov [rsp + 0x10c], rax
+	jmp FindName
+
+	;Call GetStartupinfoW.
+callSI:
+	lea qword rcx, [rsp + 0x200]
+	mov rax, [rsp + 0x158]
+	call rax
+
+FindEP:
+	mov eax, 0x74697845 
+	mov [rsp + 0x100], rax
+	mov eax, 0x636f7250 
+	mov [rsp + 0x104], rax
+	mov eax, 0x00737365
+	mov [rsp + 0x108], rax
+	jmp FindName
+
+CrtPrc:
 ;	;Call CreateProcess WinAPI with arguments.
 ;	;------------------------------------
+	;typedef struct _PROCESS_INFORMATION {
+	;  HANDLE hProcess;
+	;  HANDLE hThread;
+	;  DWORD  dwProcessId;
+	;  DWORD  dwThreadId;
+	;} PROCESS_INFORMATION, *PPROCESS_INFORMATION, *LPPROCESS_INFORMATION;
+
 ;	;BOOL CreateProcessA(
 ;	;  [in, optional]      LPCSTR                lpApplicationName,
 ;	;  [in, out, optional] LPSTR                 lpCommandLine,
@@ -220,40 +235,42 @@ endme:
 ;	;  [in]                LPSTARTUPINFOA        lpStartupInfo,
 ;	;  [out]               LPPROCESS_INFORMATION lpProcessInformation
 ;	;);
-;	;433a5c57696e646f77735c53797374656d33325c63616c632e6578655c30	<- Null terminated "C:\\Windows\\System32\\calc.exe".
-;	;6578652e636c61635c32336d65747379535c73776f646e69575c3a43	<- Little endian w/o null termination.
-;	mov rax, 0x575c3a43
-;	mov [rsp + 0x50], rax
-;	mov rax, 0x6f646e69
-;	mov [rsp + 0x54], rax
-;	mov rax, 0x535c7377
-;	mov [rsp + 0x58], rax
-;	mov rax, 0x65747379
-;	mov [rsp + 0x5c], rax
-;	mov rax, 0x5c32336d
-;	mov [rsp + 0x60], rax
-;	mov rax, 0x636c6163
-;	mov [rsp + 0x64], rax
-;	mov rax, 0x6578652e
-;	mov [rsp + 0x68], rax
-;	xor rcx, rcx
-;	lea rdx, [rsp + 0x50]
-;	xor r8, r8
-;	xor r9, r9
-;	mov qword [rsp + 0x20], 0x0000000000000000
-;	mov qword [rsp + 0x28], 0x0000000000000000
-;	mov qword [rsp + 0x30], 0x0000000000000000
-;	mov qword [rsp + 0x38], 0x0000000000000000
-;	mov qword [rsp + 0x40], r12
-;	mov qword [rsp + 0x48], r13
-;	call CreateProcessA
-;
-;	;Free memory
-;	;------------------------------------
-;
 
-;endit:
-;	;Exit process
-;	;------------------------------------
-;	xor ecx, ecx
-;	call ExitProcess
+	;433a5c57696e646f77735c53797374656d33325c63616c632e6578655c30	<- Null terminated "C:\\Windows\\System32\\calc.exe".
+	;6578652e636c61635c32336d65747379535c73776f646e69575c3a43	<- Little endian w/o null termination.
+	mov rax, 0x575c3a43
+	mov [rsp + 0x50], rax
+	mov rax, 0x6f646e69
+	mov [rsp + 0x54], rax
+	mov rax, 0x535c7377
+	mov [rsp + 0x58], rax
+	mov rax, 0x65747379
+	mov [rsp + 0x5c], rax
+	mov rax, 0x5c32336d
+	mov [rsp + 0x60], rax
+	mov rax, 0x636c6163
+	mov [rsp + 0x64], rax
+	mov rax, 0x6578652e
+	mov [rsp + 0x68], rax
+	xor rcx, rcx
+	lea rdx, [rsp + 0x50]
+	xor r8, r8
+	xor r9, r9
+	mov qword [rsp + 0x20], 0x0000000000000001
+	mov qword [rsp + 0x28], 0x0000000000000010
+	mov qword [rsp + 0x30], 0x0000000000000000
+	mov qword [rsp + 0x38], 0x0000000000000000
+	lea qword rax, [rsp + 0x200]
+	mov qword [rsp + 0x40], rax
+	lea qword rax, [rsp + 0x26c]
+	mov qword [rsp + 0x48], rax
+	mov qword rax, [rsp + 0x150]
+	call rax
+
+
+endit:
+	;Exit process
+	;------------------------------------
+	xor ecx, ecx
+	mov qword rax, [rsp + 0x160]
+	call rax
